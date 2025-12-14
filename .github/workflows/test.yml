@@ -169,13 +169,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
       
       - name: Image digest
-        run: echo "Pushed image digest: ${{ steps.docker_build.outputs.digest }}"
+        run: |
+          echo "Pushed image with tags: ${{ steps.meta.outputs.tags }}"
 
   deploy-notification:
     name: Deployment Notification
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: success()
+    if: ${{ always() }}
     steps:
       - name: Create deployment status
         run: |
