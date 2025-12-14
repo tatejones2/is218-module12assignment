@@ -4,17 +4,18 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from app.schemas.user import UserResponse
 from app.models.user import User
+from app.database import get_db
+from sqlalchemy.orm import Session
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme)
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
 ) -> UserResponse:
     """
-    Dependency to get the current user from the JWT token without a database lookup.
-    This function supports two types of payloads:
-      - A full payload as a dict containing user info.
-      - A minimal payload, either as a dict with only a 'sub' key or directly as a UUID.
+    Dependency to get the current user from the JWT token and fetch from database.
+    This ensures we always have the latest user data from the database.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -29,38 +30,23 @@ def get_current_user(
     try:
         # If the token data is a dictionary:
         if isinstance(token_data, dict):
-            # If the payload contains a full set of user fields, use them directly.
-            if "username" in token_data:
-                return UserResponse(**token_data)
-            # Otherwise, assume it is a minimal payload with only the 'sub' key.
-            elif "sub" in token_data:
-                return UserResponse(
-                    id=token_data["sub"],
-                    username="unknown",
-                    email="unknown@example.com",
-                    first_name="Unknown",
-                    last_name="User",
-                    is_active=True,
-                    is_verified=False,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
-                )
+            # Get the user ID from 'sub' claim
+            if "sub" in token_data:
+                user_id = token_data["sub"]
+                # Fetch the actual user from the database
+                user = db.query(User).filter(User.id == user_id).first()
+                if not user:
+                    raise credentials_exception
+                return UserResponse.model_validate(user)
             else:
                 raise credentials_exception
 
         # If the token data is directly a UUID (minimal payload):
         elif isinstance(token_data, UUID):
-            return UserResponse(
-                id=token_data,
-                username="unknown",
-                email="unknown@example.com",
-                first_name="Unknown",
-                last_name="User",
-                is_active=True,
-                is_verified=False,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-            )
+            user = db.query(User).filter(User.id == token_data).first()
+            if not user:
+                raise credentials_exception
+            return UserResponse.model_validate(user)
         else:
             raise credentials_exception
 
