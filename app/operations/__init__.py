@@ -118,3 +118,13 @@ def divide(a: Number, b: Number) -> float:
     # Perform division of a by b and return the result as a float
     result = a / b
     return result
+# Import UserOperations for use in other modules
+from app.operations.users import UserOperations
+
+__all__ = [
+    'add',
+    'subtract',
+    'multiply',
+    'divide',
+    'UserOperations'
+]
