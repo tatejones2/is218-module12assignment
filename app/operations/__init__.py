@@ -120,11 +120,13 @@ def divide(a: Number, b: Number) -> float:
     return result
 # Import UserOperations for use in other modules
 from app.operations.users import UserOperations
+from app.operations.calculations import CalculationOperations
 
 __all__ = [
     'add',
     'subtract',
     'multiply',
     'divide',
-    'UserOperations'
+    'UserOperations',
+    'CalculationOperations'
 ]

@@ -13,6 +13,7 @@ from app.schemas.calculation import CalculationBase, CalculationResponse, Calcul
 from app.schemas.token import TokenResponse
 from app.schemas.user import UserCreate, UserResponse, UserLogin, UserUpdate, PasswordUpdate
 from app.operations.users import UserOperations
+from app.operations.calculations import CalculationOperations
 from app.database import Base, get_db, engine
 
 # Create tables on startup
@@ -312,124 +313,197 @@ def login_form(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = D
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-# ------------------------------------------------------------------------------
-# Calculations Endpoints (BREAD)
-# ------------------------------------------------------------------------------
-# Create (Add) Calculation – using CalculationBase so that 'user_id' from the client is ignored.
+# ===============================================================================
+# Calculation Endpoints (BREAD)
+# ===============================================================================
+
+# Add (Create) Calculation
 @app.post(
     "/calculations",
     response_model=CalculationResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["calculations"],
+    summary="Create a new calculation",
+    description="Compute and persist a new calculation for the authenticated user"
 )
 def create_calculation(
     calculation_data: CalculationBase,
-    current_user = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    Compute and persist a calculation.
+    Create and compute a new calculation.
     
-    The endpoint reads the calculation type and inputs from the request (ignoring any extra fields),
-    computes the result using the appropriate operation, and assigns the authenticated user's ID.
+    The endpoint accepts a calculation type and inputs, computes the result,
+    and persists it to the database associated with the authenticated user.
+    
+    **Calculation Types:**
+    - add: Addition
+    - subtract: Subtraction
+    - multiply: Multiplication
+    - divide: Division (raises error if divisor is 0)
+    
+    **Request Body:**
+    ```json
+    {
+      "type": "add",
+      "inputs": {"a": 5, "b": 3}
+    }
+    ```
     """
     try:
-        # Create the calculation using the factory method.
-        new_calculation = Calculation.create(
-            calculation_type=calculation_data.type,
+        calculation = CalculationOperations.create_calculation(
+            db,
             user_id=current_user.id,
-            inputs=calculation_data.inputs,
+            calculation_type=calculation_data.type,
+            inputs=calculation_data.inputs
         )
-        new_calculation.result = new_calculation.get_result()
-
-        # Persist the calculation to the database.
-        db.add(new_calculation)
-        db.commit()
-        db.refresh(new_calculation)
-        return new_calculation
-
+        return calculation
     except ValueError as e:
-        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
 
-# Browse / List Calculations (for the current user)
-@app.get("/calculations", response_model=List[CalculationResponse], tags=["calculations"])
+# Browse (List) Calculations
+@app.get(
+    "/calculations",
+    response_model=List[CalculationResponse],
+    tags=["calculations"],
+    summary="List all calculations",
+    description="Retrieve all calculations for the authenticated user"
+)
 def list_calculations(
-    current_user = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    calculations = db.query(Calculation).filter(Calculation.user_id == current_user.id).all()
+    """
+    Retrieve all calculations for the authenticated user.
+    
+    Returns a list of all calculations created by the current user,
+    ordered by creation date (most recent first).
+    """
+    calculations = CalculationOperations.list_user_calculations(db, current_user.id)
     return calculations
 
-# Read / Retrieve a Specific Calculation by ID
-@app.get("/calculations/{calc_id}", response_model=CalculationResponse, tags=["calculations"])
+# Read (Retrieve) a Specific Calculation by ID
+@app.get(
+    "/calculations/{calc_id}",
+    response_model=CalculationResponse,
+    tags=["calculations"],
+    summary="Get calculation by ID",
+    description="Retrieve a specific calculation by its unique identifier"
+)
 def get_calculation(
     calc_id: str,
-    current_user = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    Retrieve a specific calculation by ID.
+    
+    - **calc_id**: Calculation's UUID
+    
+    Returns the calculation details including type, inputs, and computed result.
+    Only the owner of the calculation can retrieve it.
+    """
     try:
         calc_uuid = UUID(calc_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid calculation id format.")
-    calculation = db.query(Calculation).filter(
-        Calculation.id == calc_uuid,
-        Calculation.user_id == current_user.id
-    ).first()
-    if not calculation:
-        raise HTTPException(status_code=404, detail="Calculation not found.")
-    return calculation
+        calculation = CalculationOperations.get_calculation_by_id(
+            db, calc_uuid, current_user.id
+        )
+        return calculation
+    except ValueError as e:
+        if "Invalid" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid calculation ID format (must be UUID)"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
 
-# Edit / Update a Calculation
-@app.put("/calculations/{calc_id}", response_model=CalculationResponse, tags=["calculations"])
+# Edit (Update) a Calculation
+@app.put(
+    "/calculations/{calc_id}",
+    response_model=CalculationResponse,
+    tags=["calculations"],
+    summary="Update calculation",
+    description="Update a calculation's inputs and recompute the result"
+)
 def update_calculation(
     calc_id: str,
     calculation_update: CalculationUpdate,
-    current_user = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    Update a calculation's inputs and recompute the result.
+    
+    - **calc_id**: Calculation's UUID
+    - **inputs**: New calculation inputs (optional)
+    
+    When inputs are updated, the result is automatically recomputed.
+    The calculation timestamp is updated to reflect the modification.
+    """
     try:
         calc_uuid = UUID(calc_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid calculation id format.")
-    calculation = db.query(Calculation).filter(
-        Calculation.id == calc_uuid,
-        Calculation.user_id == current_user.id
-    ).first()
-    if not calculation:
-        raise HTTPException(status_code=404, detail="Calculation not found.")
-
-    if calculation_update.inputs is not None:
-        calculation.inputs = calculation_update.inputs
-        calculation.result = calculation.get_result()
-    calculation.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(calculation)
-    return calculation
+        calculation = CalculationOperations.update_calculation(
+            db, calc_uuid, current_user.id, calculation_update
+        )
+        return calculation
+    except ValueError as e:
+        if "Invalid" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid calculation ID format (must be UUID)"
+            )
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 # Delete a Calculation
-@app.delete("/calculations/{calc_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["calculations"])
+@app.delete(
+    "/calculations/{calc_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["calculations"],
+    summary="Delete calculation",
+    description="Permanently delete a calculation"
+)
 def delete_calculation(
     calc_id: str,
-    current_user = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    Delete a calculation permanently.
+    
+    - **calc_id**: Calculation's UUID
+    
+    Only the owner of the calculation can delete it.
+    This action cannot be undone.
+    """
     try:
         calc_uuid = UUID(calc_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid calculation id format.")
-    calculation = db.query(Calculation).filter(
-        Calculation.id == calc_uuid,
-        Calculation.user_id == current_user.id
-    ).first()
-    if not calculation:
-        raise HTTPException(status_code=404, detail="Calculation not found.")
-    db.delete(calculation)
-    db.commit()
-    return None
+        CalculationOperations.delete_calculation(db, calc_uuid, current_user.id)
+        return None
+    except ValueError as e:
+        if "Invalid" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid calculation ID format (must be UUID)"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
 
 # ------------------------------------------------------------------------------
 # Main Block to Run the Server
