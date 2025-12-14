@@ -1,3 +1,60 @@
+# FastAPI Calculator with Integration Tests & CI/CD
+
+## 🔗 Quick Links
+
+- **GitHub Repository**: [tatejones2/is218-module12assignment](https://github.com/tatejones2/is218-module12assignment)
+- **Docker Hub**: [Docker Hub Repository](https://hub.docker.com/r/tatejones2/is218-module12)
+
+## 🧪 Integration Tests
+
+### Run Integration Tests Locally
+
+```bash
+# Start PostgreSQL (using Docker)
+docker-compose up -d
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run all integration tests
+pytest tests/integration/test_integration_comprehensive.py -v
+
+# Run with coverage report
+pytest tests/integration/test_integration_comprehensive.py -v --cov=app --cov-report=html
+```
+
+The test suite includes 29 comprehensive tests covering:
+- User registration and authentication
+- Calculation CRUD operations
+- Error handling and validation
+- Data isolation and security
+- Health check endpoints
+
+### Manual Testing via OpenAPI
+
+1. Start the application:
+   ```bash
+   docker-compose up
+   ```
+
+2. Open the interactive API documentation:
+   - **Swagger UI**: http://localhost:8000/docs
+   - **ReDoc**: http://localhost:8000/redoc
+
+3. Test endpoints interactively with pre-built forms and instant feedback
+
+### CI/CD Automation
+
+The project uses GitHub Actions to:
+- ✅ Run all integration tests on every push
+- 🔒 Scan for security vulnerabilities with Trivy
+- 🐳 Build multi-platform Docker images (amd64 & arm64)
+- 📤 Automatically push images to Docker Hub on success
+
+View workflow runs: [GitHub Actions](https://github.com/tatejones2/is218-module12assignment/actions)
+
+---
+
 # 📦 Project Setup
 
 ---
